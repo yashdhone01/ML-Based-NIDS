@@ -1,17 +1,18 @@
-from flask import Flask, request, jsonify, render_template
-from src.predict import predict_single
+from flask import Flask, request, jsonify
+from src.predict import NIDSEngine
 
 app = Flask(__name__)
-
-@app.route('/')
-def dashboard():
-    return render_template('index.html')
+engine = NIDSEngine()  # load model once at startup
 
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
         data = request.get_json()
-        result = predict_single(data)
+        # support single dict or list of dicts
+        if isinstance(data, list):
+            result = engine.predict_batch(data)
+        else:
+            result = engine.predict(data)
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 400
@@ -20,6 +21,5 @@ def predict():
 def health():
     return jsonify({'status': 'running', 'model': 'Random Forest IDS'})
 
-# Run the Flask app
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)
