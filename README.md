@@ -17,8 +17,6 @@ cd nids-ml-engine
 docker compose up --build
 ```
 
-Open **http://localhost:8000**
-
 No root access, no network interface, no setup. The demo mode generates a realistic mix of attack and normal traffic so the dashboard is live immediately.
 
 ![Dashboard screenshot — live alert feed with DoS/Probe/R2L/U2R detection](.github/dashboard.png)
@@ -122,31 +120,6 @@ sudo python -m src.monitor --interface eth0 --log alerts.ndjson
 ```bash
 NIDS_INTERFACE=eth0 docker compose -f docker-compose.live.yml up --build
 ```
-
----
-
-## Project structure
-
-```
-nids/
-├── src/
-│   ├── preprocess.py     data pipeline — encodes + scales, saves artifacts
-│   ├── train.py          trains Random Forest, saves model
-│   ├── predict.py        NIDSEngine — loads model + encoders, runs inference
-│   ├── capture.py        raw packet capture, bidirectional flow assembly
-│   ├── features.py       19-feature KDD extractor, traffic window, host table
-│   ├── flow_monitor.py   capture → features → ML → alerts pipeline
-│   ├── api.py            FastAPI backend, WebSocket streaming
-│   ├── demo.py           synthetic traffic generator for demo mode
-│   ├── cli.py            argument parsing
-│   └── monitor.py        python -m src.monitor entrypoint
-├── dashboard.html        single-file real-time dashboard
-├── test_pipeline.py      offline integration tests (no root required)
-├── Dockerfile
-├── docker-compose.yml
-└── requirements.txt
-```
-
 ---
 
 ## Dashboard
@@ -191,33 +164,6 @@ Alert schema:
   "flag": "S0"
 }
 ```
-
----
-
-## Limitations and roadmap
-
-**Current limitations:**
-- Content features (group 10–22) default to 0 — requires DPI to compute `logged_in`, `num_failed_logins`, etc. This limits R2L/U2R precision.
-- Trained on KDD99 (1999 synthetic data). Real-world accuracy lower — modern attacks weren't in training distribution.
-- No active response (blocking). Detection only.
-
-**Roadmap:**
-- [ ] CICIDS2017 / NSL-KDD retraining for modern attack patterns
-- [ ] DPI for content features (FTP/Telnet payload parsing)
-- [ ] `iptables` auto-block for high-confidence DoS/U2R
-- [ ] Adversarial robustness testing (feature perturbation attacks)
-- [ ] Multi-NIC support
-
----
-
-## Technical notes
-
-**Why the IDS is stateful:** A single S0 (unanswered SYN) is indistinguishable from a normal timeout. Neptune DoS is detectable because `count` hits 300+ within 2 seconds to the same host — that's what `TrafficWindow` tracks. Same logic applies to Probe: a portsweep is detectable via `dst_host_diff_srv_rate ≈ 1.0`, not by any single packet.
-
-**Why LabelEncoders are saved:** `sklearn`'s `LabelEncoder` sorts classes alphabetically at fit time. Without saving the fitted encoder, the integer mapping (`'tcp'→1`) is non-deterministic across Python sessions. Passing `'tcp'` as a string to a scaler trained on integers causes `ValueError: could not convert string to float` at inference time.
-
-**Bidirectional flow keying:** `PacketCapture` checks both `(src→dst)` and `(dst→src)` keys when a packet arrives, so a single `FlowRecord` accumulates both directions of a TCP conversation. This is necessary to compute `dst_bytes` (the server's response) from a passive tap.
-
 ---
 
 ## Feedback
