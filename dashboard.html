@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NIDS — Network Intrusion Detection</title>
+<style>
+  /* Fonts load async — dashboard works fully offline with system fallbacks */
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@400;600;800&display=swap');
+  :root {
+    --bg:       #080b0f;
+    --bg2:      #0d1117;
+    --bg3:      #111820;
+    --border:   #1e2d3d;
+    --border2:  #243447;
+    --text:     #c9d1d9;
+    --muted:    #4a5568;
+    --dim:      #2d3748;
+
+    --normal:   #238636;
+    --normal-t: #3fb950;
+    --low:      #9e6a03;
+    --low-t:    #d29922;
+    --medium:   #b08800;
+    --medium-t: #e3b341;
+    --high:     #8b1a1a;
+    --high-t:   #f85149;
+    --crit:     #6e2c91;
+    --crit-t:   #bc8cff;
+
+    --accent:   #58a6ff;
+    --accent2:  #1f6feb;
+    --green:    #3fb950;
+    --mono:     'JetBrains Mono', 'Cascadia Code', 'Consolas', monospace;
+    --display:  'Syne', 'Segoe UI', system-ui, sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.6;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.03) 2px,
+      rgba(0,0,0,0.03) 4px
+    );
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* ---- Header ---- */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .logo-icon {
+    width: 32px; height: 32px;
+    border: 1.5px solid var(--accent);
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--accent);
+    font-size: 16px;
+    position: relative;
+    overflow: hidden;
+  }
+  .logo-icon::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgba(88,166,255,0.08);
+    animation: pulse-bg 3s ease-in-out infinite;
+  }
+  @keyframes pulse-bg {
+    0%,100% { opacity: 1; } 50% { opacity: 0.3; }
+  }
+
+  .logo-text {
+    font-family: var(--display);
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    color: #fff;
+  }
+  .logo-text span { color: var(--accent); }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    font-size: 11px;
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+
+  .status-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 6px var(--green);
+    animation: blink 2s ease-in-out infinite;
+    display: inline-block;
+    margin-right: 5px;
+  }
+  .status-dot.offline { background: var(--high-t); box-shadow: 0 0 6px var(--high-t); animation: none; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  #mode-badge {
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    background: rgba(88,166,255,0.12);
+    color: var(--accent);
+    border: 1px solid rgba(88,166,255,0.3);
+  }
+
+  /* ---- Layout ---- */
+  .main { padding: 20px 24px; display: flex; flex-direction: column; gap: 20px; }
+
+  /* ---- Stat cards ---- */
+  .stat-row {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+  }
+
+  .stat-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+  .stat-card:hover { border-color: var(--border2); }
+  .stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--accent2);
+    opacity: 0.6;
+  }
+  .stat-card.danger::before { background: var(--high-t); }
+  .stat-card.warn::before   { background: var(--medium-t); }
+  .stat-card.crit::before   { background: var(--crit-t); }
+  .stat-card.ok::before     { background: var(--green); }
+
+  .stat-label {
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .stat-value {
+    font-family: var(--display);
+    font-size: 28px;
+    font-weight: 800;
+    color: #fff;
+    line-height: 1;
+    transition: color 0.3s;
+  }
+  .stat-sub {
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+
+  /* ---- Content grid ---- */
+  .content-grid {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 16px;
+  }
+
+  /* ---- Panel ---- */
+  .panel {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(0,0,0,0.2);
+  }
+  .panel-title {
+    font-family: var(--display);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: #fff;
+    text-transform: uppercase;
+  }
+  .panel-badge {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: rgba(88,166,255,0.1);
+    color: var(--accent);
+    border: 1px solid rgba(88,166,255,0.2);
+  }
+
+  /* ---- Alert feed ---- */
+  #alert-feed {
+    height: 460px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--dim) transparent;
+  }
+  #alert-feed::-webkit-scrollbar { width: 4px; }
+  #alert-feed::-webkit-scrollbar-thumb { background: var(--dim); border-radius: 2px; }
+
+  .alert-row {
+    display: grid;
+    grid-template-columns: 70px 80px 1fr 90px 70px;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 16px;
+    border-bottom: 1px solid rgba(30,45,61,0.5);
+    font-size: 11px;
+    transition: background 0.15s;
+    animation: slide-in 0.2s ease;
+  }
+  @keyframes slide-in {
+    from { opacity: 0; transform: translateX(-6px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+  .alert-row:hover { background: rgba(255,255,255,0.02); }
+  .alert-row.Normal  { border-left: 2px solid var(--normal); }
+  .alert-row.DoS     { border-left: 2px solid var(--high-t); background: rgba(139,26,26,0.06); }
+  .alert-row.Probe   { border-left: 2px solid var(--low-t); background: rgba(158,106,3,0.06); }
+  .alert-row.R2L     { border-left: 2px solid var(--medium-t); background: rgba(176,136,0,0.06); }
+  .alert-row.U2R     { border-left: 2px solid var(--crit-t); background: rgba(110,44,145,0.1); }
+
+  .sev-badge {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    padding: 2px 5px;
+    border-radius: 3px;
+    text-align: center;
+  }
+  .sev-INFO     { background: rgba(35,134,54,0.2);   color: var(--normal-t); }
+  .sev-LOW      { background: rgba(158,106,3,0.2);   color: var(--low-t); }
+  .sev-MEDIUM   { background: rgba(176,136,0,0.2);   color: var(--medium-t); }
+  .sev-HIGH     { background: rgba(139,26,26,0.2);   color: var(--high-t); }
+  .sev-CRITICAL { background: rgba(110,44,145,0.2);  color: var(--crit-t); }
+
+  .alert-ip   { color: var(--accent); font-size: 11px; font-family: var(--mono); }
+  .alert-type { font-weight: 700; font-size: 11px; }
+  .alert-type.DoS  { color: var(--high-t); }
+  .alert-type.Probe{ color: var(--low-t); }
+  .alert-type.R2L  { color: var(--medium-t); }
+  .alert-type.U2R  { color: var(--crit-t); }
+  .alert-type.Normal{ color: var(--normal-t); }
+  .alert-conf { color: var(--muted); font-size: 10px; text-align: right; }
+  .alert-time { color: var(--muted); font-size: 10px; text-align: right; }
+
+  .feed-header {
+    display: grid;
+    grid-template-columns: 70px 80px 1fr 90px 70px;
+    gap: 8px;
+    padding: 6px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  /* ---- Sidebar ---- */
+  .sidebar { display: flex; flex-direction: column; gap: 16px; }
+
+  /* ---- Attack type breakdown ---- */
+  .breakdown { padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+
+  .bk-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .bk-label {
+    width: 52px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+  }
+  .bk-bar-wrap {
+    flex: 1;
+    height: 6px;
+    background: var(--bg3);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .bk-bar {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.6s cubic-bezier(0.34,1.56,0.64,1);
+    width: 0%;
+  }
+  .bk-count { font-size: 11px; color: var(--text); min-width: 28px; text-align: right; }
+
+  .bk-DoS    .bk-bar { background: var(--high-t); }
+  .bk-Probe  .bk-bar { background: var(--low-t); }
+  .bk-R2L    .bk-bar { background: var(--medium-t); }
+  .bk-U2R    .bk-bar { background: var(--crit-t); }
+  .bk-Normal .bk-bar { background: var(--normal-t); }
+  .bk-DoS    .bk-label { color: var(--high-t); }
+  .bk-Probe  .bk-label { color: var(--low-t); }
+  .bk-R2L    .bk-label { color: var(--medium-t); }
+  .bk-U2R    .bk-label { color: var(--crit-t); }
+  .bk-Normal .bk-label { color: var(--normal-t); }
+
+  /* ---- Throughput sparkline ---- */
+  #sparkline {
+    width: 100%;
+    height: 60px;
+    display: block;
+  }
+
+  /* ---- Top sources ---- */
+  .top-src { padding: 4px 0; }
+  .src-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 16px;
+    font-size: 11px;
+    border-bottom: 1px solid rgba(30,45,61,0.4);
+  }
+  .src-row:last-child { border-bottom: none; }
+  .src-ip { color: var(--accent); }
+  .src-count { color: var(--muted); }
+  .src-bar-wrap { flex: 1; margin: 0 10px; height: 3px; background: var(--bg3); border-radius: 2px; }
+  .src-bar { height: 100%; background: var(--accent2); border-radius: 2px; transition: width 0.4s; }
+
+  /* ---- Empty state ---- */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 200px;
+    color: var(--muted);
+    gap: 8px;
+  }
+  .empty-icon { font-size: 32px; opacity: 0.3; }
+  .empty-text { font-size: 11px; letter-spacing: 0.06em; }
+
+  /* ---- Scrollbar ---- */
+  * { scrollbar-width: thin; scrollbar-color: var(--dim) transparent; }
+
+  @media (max-width: 1100px) {
+    .stat-row { grid-template-columns: repeat(3,1fr); }
+    .content-grid { grid-template-columns: 1fr; }
+    .sidebar { flex-direction: row; flex-wrap: wrap; }
+    .sidebar .panel { flex: 1; min-width: 280px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">⬡</div>
+    <div class="logo-text">N<span>IDS</span></div>
+    <div style="color:var(--muted);font-size:11px;margin-left:4px;">// network intrusion detection</div>
+  </div>
+  <div class="header-right">
+    <span id="mode-badge">DEMO</span>
+    <span><span class="status-dot" id="conn-dot"></span><span id="conn-status">connecting</span></span>
+    <span id="uptime-display">up 0s</span>
+  </div>
+</header>
+
+<div class="main">
+
+  <!-- Stat cards -->
+  <div class="stat-row">
+    <div class="stat-card ok">
+      <div class="stat-label">Flows Analyzed</div>
+      <div class="stat-value" id="stat-flows">0</div>
+      <div class="stat-sub">total processed</div>
+    </div>
+    <div class="stat-card danger">
+      <div class="stat-label">DoS Attacks</div>
+      <div class="stat-value" id="stat-dos">0</div>
+      <div class="stat-sub">denial of service</div>
+    </div>
+    <div class="stat-card warn">
+      <div class="stat-label">Probe / Scan</div>
+      <div class="stat-value" id="stat-probe">0</div>
+      <div class="stat-sub">reconnaissance</div>
+    </div>
+    <div class="stat-card warn">
+      <div class="stat-label">R2L Attempts</div>
+      <div class="stat-value" id="stat-r2l">0</div>
+      <div class="stat-sub">remote-to-local</div>
+    </div>
+    <div class="stat-card crit">
+      <div class="stat-label">U2R Escalation</div>
+      <div class="stat-value" id="stat-u2r">0</div>
+      <div class="stat-sub">privilege escalation</div>
+    </div>
+  </div>
+
+  <!-- Content -->
+  <div class="content-grid">
+
+    <!-- Alert feed -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-title">Live Alert Feed</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <label style="font-size:10px;color:var(--muted);display:flex;align-items:center;gap:5px;cursor:pointer">
+            <input type="checkbox" id="show-normal" style="accent-color:var(--accent)"> show normal
+          </label>
+          <span class="panel-badge" id="alert-count">0 alerts</span>
+        </div>
+      </div>
+      <div class="feed-header">
+        <span>severity</span><span>type</span><span>source → dest</span><span>service</span><span>conf</span>
+      </div>
+      <div id="alert-feed">
+        <div class="empty-state">
+          <div class="empty-icon">◈</div>
+          <div class="empty-text">awaiting traffic...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+
+      <!-- Throughput -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">Throughput</div>
+          <span style="font-size:10px;color:var(--muted)" id="fps-label">0 flows/s</span>
+        </div>
+        <div style="padding:12px 16px 8px">
+          <svg id="sparkline" viewBox="0 0 300 60" preserveAspectRatio="none">
+            <polyline id="spark-line" points="" fill="none"
+              stroke="var(--accent)" stroke-width="1.5"
+              stroke-linejoin="round" stroke-linecap="round"/>
+            <polygon id="spark-fill" points=""
+              fill="rgba(88,166,255,0.08)"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- Attack breakdown -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">Attack Breakdown</div>
+        </div>
+        <div class="breakdown">
+          <div class="bk-row bk-DoS">
+            <div class="bk-label">DoS</div>
+            <div class="bk-bar-wrap"><div class="bk-bar" id="bk-DoS"></div></div>
+            <div class="bk-count" id="bc-DoS">0</div>
+          </div>
+          <div class="bk-row bk-Probe">
+            <div class="bk-label">Probe</div>
+            <div class="bk-bar-wrap"><div class="bk-bar" id="bk-Probe"></div></div>
+            <div class="bk-count" id="bc-Probe">0</div>
+          </div>
+          <div class="bk-row bk-R2L">
+            <div class="bk-label">R2L</div>
+            <div class="bk-bar-wrap"><div class="bk-bar" id="bk-R2L"></div></div>
+            <div class="bk-count" id="bc-R2L">0</div>
+          </div>
+          <div class="bk-row bk-U2R">
+            <div class="bk-label">U2R</div>
+            <div class="bk-bar-wrap"><div class="bk-bar" id="bk-U2R"></div></div>
+            <div class="bk-count" id="bc-U2R">0</div>
+          </div>
+          <div class="bk-row bk-Normal">
+            <div class="bk-label">Normal</div>
+            <div class="bk-bar-wrap"><div class="bk-bar" id="bk-Normal"></div></div>
+            <div class="bk-count" id="bc-Normal">0</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Top sources -->
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">Top Sources</div>
+          <span class="panel-badge">by alerts</span>
+        </div>
+        <div class="top-src" id="top-sources">
+          <div class="empty-state" style="height:100px">
+            <div class="empty-text">no data yet</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+// ---- State ----
+const counts   = {Normal:0, DoS:0, Probe:0, R2L:0, U2R:0};
+const srcMap   = {};
+const sparkBuf = [];
+const MAX_ROWS = 200;
+const MAX_SPARK= 60;
+let   totalFlows = 0;
+let   lastFlowCount = 0;
+let   startTime = Date.now();
+let   showNormal = false;
+
+document.getElementById('show-normal').addEventListener('change', e => {
+  showNormal = e.target.checked;
+});
+
+// ---- WebSocket ----
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/ws/alerts`);
+
+  ws.onopen = () => {
+    document.getElementById('conn-dot').classList.remove('offline');
+    document.getElementById('conn-status').textContent = 'live';
+  };
+
+  ws.onclose = () => {
+    document.getElementById('conn-dot').classList.add('offline');
+    document.getElementById('conn-status').textContent = 'reconnecting';
+    setTimeout(connect, 3000);
+  };
+
+  ws.onmessage = e => {
+    const data = JSON.parse(e.data);
+    if (data.type === 'ping') return;
+    onAlert(data);
+  };
+}
+
+// ---- Stats polling ----
+async function pollStats() {
+  try {
+    const r = await fetch('/api/stats');
+    const s = await r.json();
+    totalFlows = s.flows_processed || 0;
+    document.getElementById('stat-flows').textContent = fmt(totalFlows);
+    document.getElementById('uptime-display').textContent = `up ${fmtUptime(s.uptime_seconds||0)}`;
+    document.getElementById('mode-badge').textContent = s.demo_mode ? 'DEMO' : 'LIVE';
+  } catch(_) {}
+}
+
+// ---- Alert handler ----
+function onAlert(a) {
+  const pred = a.prediction || 'Normal';
+  counts[pred] = (counts[pred]||0) + 1;
+  srcMap[a.src_ip] = (srcMap[a.src_ip]||0) + 1;
+
+  updateStats();
+  updateBreakdown();
+  updateTopSources();
+
+  if (!showNormal && pred === 'Normal') return;
+  addFeedRow(a);
+}
+
+function addFeedRow(a) {
+  const feed = document.getElementById('alert-feed');
+
+  // Remove empty state
+  const empty = feed.querySelector('.empty-state');
+  if (empty) empty.remove();
+
+  // Remove old rows
+  while (feed.children.length >= MAX_ROWS) {
+    feed.removeChild(feed.lastChild);
+  }
+
+  const pred = a.prediction || 'Normal';
+  const sev  = a.severity   || 'INFO';
+  const ts   = new Date(a.timestamp * 1000);
+  const time = ts.toTimeString().slice(0,8);
+
+  const row = document.createElement('div');
+  row.className = `alert-row ${pred}`;
+  row.innerHTML = `
+    <span class="sev-badge sev-${sev}">${sev}</span>
+    <span class="alert-type ${pred}">${pred}</span>
+    <span class="alert-ip">${a.src_ip}<span style="color:var(--muted)">→</span>${a.dst_ip}</span>
+    <span style="color:var(--muted)">${a.service || '-'}</span>
+    <span class="alert-conf">${(a.confidence*100).toFixed(0)}%</span>
+  `;
+  row.title = `${time} | ${a.protocol?.toUpperCase()} | ${a.src_ip}:${a.src_port} → ${a.dst_ip}:${a.dst_port} | flag:${a.flag}`;
+  feed.insertBefore(row, feed.firstChild);
+}
+
+function updateStats() {
+  document.getElementById('stat-dos').textContent   = fmt(counts.DoS);
+  document.getElementById('stat-probe').textContent = fmt(counts.Probe);
+  document.getElementById('stat-r2l').textContent   = fmt(counts.R2L);
+  document.getElementById('stat-u2r').textContent   = fmt(counts.U2R);
+  const total = Object.values(counts).reduce((a,b)=>a+b,0);
+  document.getElementById('alert-count').textContent= `${fmt(total)} alerts`;
+}
+
+function updateBreakdown() {
+  const total = Math.max(Object.values(counts).reduce((a,b)=>a+b,0), 1);
+  for (const k of ['DoS','Probe','R2L','U2R','Normal']) {
+    const pct = (counts[k]||0) / total * 100;
+    document.getElementById(`bk-${k}`).style.width = pct + '%';
+    document.getElementById(`bc-${k}`).textContent = fmt(counts[k]||0);
+  }
+}
+
+function updateTopSources() {
+  const sorted = Object.entries(srcMap)
+    .sort((a,b)=>b[1]-a[1]).slice(0,6);
+  if (!sorted.length) return;
+  const max = sorted[0][1];
+  const container = document.getElementById('top-sources');
+  const empty = container.querySelector('.empty-state');
+  if (empty) empty.remove();
+  container.innerHTML = sorted.map(([ip, cnt]) => `
+    <div class="src-row">
+      <span class="src-ip">${ip}</span>
+      <div class="src-bar-wrap"><div class="src-bar" style="width:${cnt/max*100}%"></div></div>
+      <span class="src-count">${cnt}</span>
+    </div>`).join('');
+}
+
+// ---- Sparkline ----
+let sparkInterval = setInterval(() => {
+  const fps = totalFlows - lastFlowCount;
+  lastFlowCount = totalFlows;
+  sparkBuf.push(fps);
+  if (sparkBuf.length > MAX_SPARK) sparkBuf.shift();
+
+  document.getElementById('fps-label').textContent = `${fps} flows/s`;
+
+  const W=300, H=60, pad=4;
+  const max = Math.max(...sparkBuf, 1);
+  const pts = sparkBuf.map((v,i) => {
+    const x = pad + (i / (MAX_SPARK-1)) * (W-2*pad);
+    const y = H - pad - (v/max)*(H-2*pad);
+    return `${x},${y}`;
+  }).join(' ');
+
+  const fillPts = `${pad},${H} ` + pts + ` ${pad+(sparkBuf.length-1)/(MAX_SPARK-1)*(W-2*pad)},${H}`;
+
+  document.getElementById('spark-line').setAttribute('points', pts);
+  document.getElementById('spark-fill').setAttribute('points', fillPts);
+}, 1000);
+
+// ---- Uptime ----
+setInterval(() => {
+  pollStats();
+}, 5000);
+pollStats();
+
+// ---- Helpers ----
+function fmt(n) {
+  if (n >= 1000000) return (n/1000000).toFixed(1)+'M';
+  if (n >= 1000)    return (n/1000).toFixed(1)+'K';
+  return String(n||0);
+}
+function fmtUptime(s) {
+  if (s < 60)   return `${Math.floor(s)}s`;
+  if (s < 3600) return `${Math.floor(s/60)}m ${Math.floor(s%60)}s`;
+  return `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m`;
+}
+
+connect();
+</script>
+</body>
+</html>

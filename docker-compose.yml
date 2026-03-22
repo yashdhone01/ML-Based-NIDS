@@ -1,0 +1,13 @@
+services:
+
+  # Demo mode — no root or network interface required.
+  # For live capture on Linux: set NIDS_DEMO=0, NIDS_INTERFACE=eth0,
+  # add network_mode: host and cap_add: [NET_RAW, NET_ADMIN]
+  nids:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - NIDS_DEMO=1
+      - NIDS_THRESHOLD=0.5
+    restart: unless-stopped
